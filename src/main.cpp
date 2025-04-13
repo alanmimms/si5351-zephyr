@@ -3,12 +3,12 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
 
-// I2C bus address of the SI5351A
+// I2C bus address of the SI5351
 enum {
   SI5351_I2C_ADDRESS = 0x60,
 };
 
-// I2C addresses within the SI5351A.
+// I2C addresses within the SI5351.
 enum {
   SI5351_deviceStatus = 0,
 };
@@ -30,18 +30,18 @@ int main(void) {
   st = i2c_reg_read_byte(i2cDev, SI5351_I2C_ADDRESS, SI5351_deviceStatus, &devStatus);
 
   if (st) {
-    printf("Unable to get SI5351A device status register (0) (err %i)\n", st);
+    printf("Unable to get SI5351 device status register (0) (err %i)\n", st);
     return -1;
   }
 
-  printf("SI5351A device_status=%02X\n", (int) devStatus);
+  printf("SI5351 device_status=%02X\n", (int) devStatus);
 
   uint8_t regs[256];
   
   st = i2c_burst_read(i2cDev, SI5351_I2C_ADDRESS, 0, regs, sizeof(regs));
 
   if (st) {
-    printf("Unable to burst read all SI5351A registers (err %i)\n", st);
+    printf("Unable to burst read all SI5351 registers (err %i)\n", st);
     return -1;
   }
 
