@@ -1,11 +1,10 @@
 // SI5351 driver
 //
 // This driver assumes that clk0 and clk1 are outputs from the same
-// frequency with clk0 at 0 degrees phase offset and clk1 at 90
-// degrees phase offset - a quadrature clock. This assumption is
+// frequency with clk0 at 0 degrees phase offset and clk1 at 180
+// degrees phase offset - a push-pull clock. This assumption is
 // convenient allowing these two clocks to be driven from the same
-// SI5351 internal PLL, leaving the other PLL for clk2 to be used
-// independently for the transmitter clock or for calibration.
+// SI5351 internal PLL.
 
 // In general in this driver, if an API sets a thing's value it
 // provides the thing's previous value as its return value.
@@ -17,11 +16,11 @@
  *  This lib tricks:
  *
  * CLK0 will use PLLA
- * CLK1 will use PLLB
- * CLK2 will use PLLB
+ * CLK1 will use PLLA
+ * CLK2 will use PLLA
  *
  * Lib defaults
- * - XTAL is 27 Mhz.
+ * - XTAL is 26 Mhz.
  * - Always put the internal 8pF across the xtal legs to GND
  * - lowest power output (2mA)
  * - After the init all outputs are off, you need to enable them in your code.
@@ -136,7 +135,7 @@ public:
   bool clkOn[SICHANNELS] = { 0 };     // This should not really be public - use isEnabled()
 
 public:
-  SI5351A(uint32_t clkinHz = 27*1000*1000);
+  SI5351A(uint32_t clkinHz = 26*1000*1000);
 
   void reset();
 
@@ -155,28 +154,28 @@ public:
   void init(void);
 
   // custom init procedure (XTAL in Hz);
-  void init(uint32_t);
+  void init(uint32_t refHz);
 
   // reset all PLLs
   static void reset(void);
 
   // set CLKx(0..2) to freq (Hz)
-  void setFreq(uint8_t, uint32_t);
+  void setFreq(uint8_t clkNum, uint32_t freqHz);
 
-  // pass a correction factor
-  void correction(int32_t);
+  // pass a correction factor (signed offset in Hz).
+  void correction(int32_t realRefOffsetFromPresumedHz);
 
   // enable some CLKx output
-  void enable(uint8_t);
+  void enable(uint8_t clkNum);
 
   // disable some CLKx output
-  void disable(uint8_t);
+  void disable(uint8_t clkNum);
 
   // disable all outputs
   void off(void);
 
   // set power output to a specific clk
-  void setPower(uint8_t, uint8_t);
+  void setPower(uint8_t clkNum, uint8_t driveStrengthInmA);
 
   // used to talk with the chip, via Arduino Wire lib
   //

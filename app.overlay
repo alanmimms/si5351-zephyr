@@ -1,0 +1,43 @@
+/*
+ * Devicetree overlay for Si5351A on ESP32-C3
+ * Custom hardware pin mapping: SCL -> GPIO4, SDA -> GPIO5
+ */
+
+#include <zephyr/dt-bindings/pinctrl/esp-pinctrl-common.h>
+#include <dt-bindings/pinctrl/esp32c3-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,console = &usb_serial;
+		zephyr,shell-uart = &usb_serial;
+	};
+};
+
+&usb_serial {
+	status = "okay";
+};
+
+&pinctrl {
+	i2c0_custom: i2c0_custom {
+		group1 {
+			pinmux = <I2C0_SCL_GPIO4>,
+				 <I2C0_SDA_GPIO5>;
+			bias-pull-up;
+			drive-open-drain;
+			output-high;
+		};
+	};
+};
+
+&i2c0 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	pinctrl-0 = <&i2c0_custom>;
+	pinctrl-names = "default";
+
+	si5351a: si5351a@60 {
+		compatible = "skyworks,si5351a";
+		reg = <0x60>;
+		status = "okay";
+	};
+};

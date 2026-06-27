@@ -1,56 +1,27 @@
-#include <stdio.h>
 #include <zephyr/kernel.h>
-#include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/logging/log.h>
+#include "Si5351.hpp"
+#include "shell-commands.hpp"
 
-// I2C bus address of the SI5351
-enum {
-  SI5351_I2C_ADDRESS = 0x60,
-};
+LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
-// I2C addresses within the SI5351.
-enum {
-  SI5351_deviceStatus = 0,
-};
+Si5351 gSi5351;
+const struct i2c_dt_spec gI2CSpec = I2C_DT_SPEC_GET(DT_NODELABEL(si5351a));
 
-
-static const struct device *i2cDev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-
-
-// NOTE: I2C is not thread safe.
 int main(void) {
-  int st;
+  LOG_INF("Starting Si5351 C++20 Zephyr Shell Testbed...");
 
-  if (i2cDev == NULL || !device_is_ready(i2cDev)) {
-    printf("Could not get I2C device\n");
-    return -1;
+  if (!i2c_is_ready_dt(&gI2CSpec)) {
+    LOG_ERR("I2C device %s is NOT ready! Check hardware wiring.", gI2CSpec.bus->name);
+  } else {
+    LOG_INF("I2C bus %s ready. Initializing Si5351...", gI2CSpec.bus->name);
+    // Auto-initialize with 26 MHz reference clock and 14.0956 MHz (20m WSPR band base)
+    if (!gSi5351.init(&gI2CSpec, MHZ(26), 14095600)) {
+      LOG_WRN("Si5351 auto-init failed. You can use 'si5351 init' in the shell to retry.");
+    }
   }
 
-  uint8_t devStatus = 0;
-  st = i2c_reg_read_byte(i2cDev, SI5351_I2C_ADDRESS, SI5351_deviceStatus, &devStatus);
-
-  if (st) {
-    printf("Unable to get SI5351 device status register (0) (err %i)\n", st);
-    return -1;
-  }
-
-  printf("SI5351 device_status=%02X\n", (int) devStatus);
-
-  uint8_t regs[256];
-  
-  st = i2c_burst_read(i2cDev, SI5351_I2C_ADDRESS, 0, regs, sizeof(regs));
-
-  if (st) {
-    printf("Unable to burst read all SI5351 registers (err %i)\n", st);
-    return -1;
-  }
-
-  printf("\nSI5351 Registers:");
-  for (int k=0; k < 256; ++k) {
-    if (k % 16 == 0) printf("\n%02X: ", k);
-    printf("%02X ", regs[k]);
-  }
-
-  printf("\n");
+  LOG_INF("Zephyr shell active. Type 'si5351 help' or press TAB for commands.");
   return 0;
 }
