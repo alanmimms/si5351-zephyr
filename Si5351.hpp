@@ -45,6 +45,9 @@ public:
   // Enable/disable specific clock output (0..7)
   void setOutputEnable(uint8_t clk, bool enabled);
 
+  // Sets drive strength (2, 4, 6, or 8 mA) for specific clock output (0..7)
+  bool setDriveStrengthmA(uint8_t clk, uint8_t drivemA);
+
   // Reads live hardware registers via burst read and decodes ground truth status
   bool readLiveGroundTruth(LiveDeviceStatus &status);
 

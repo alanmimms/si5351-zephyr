@@ -103,6 +103,28 @@ static int cmdEnable(const struct shell *sh, size_t argc, char **argv) {
   return 0;
 }
 
+static int cmdDrive(const struct shell *sh, size_t argc, char **argv) {
+  if (argc < 3) {
+    shell_error(sh, "Usage: si5351 drive <clk_0_to_7> <2|4|6|8>");
+    return -EINVAL;
+  }
+  uint8_t clk = static_cast<uint8_t>(strtoul(argv[1], NULL, 0));
+  uint8_t drv = static_cast<uint8_t>(strtoul(argv[2], NULL, 0));
+
+  if (clk > 7) {
+    shell_error(sh, "Invalid clock output channel: %u (must be 0..7)", clk);
+    return -EINVAL;
+  }
+
+  if (!gSi5351.setDriveStrengthmA(clk, drv)) {
+    shell_error(sh, "Invalid drive strength: %umA (must be 2, 4, 6, or 8)", drv);
+    return -EINVAL;
+  }
+
+  shell_print(sh, "CLK%u drive strength set to %umA", clk, drv);
+  return 0;
+}
+
 static int cmdStatus(const struct shell *sh, size_t argc, char **argv) {
   LiveDeviceStatus live;
   if (!gSi5351.readLiveGroundTruth(live)) {
@@ -206,6 +228,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(subSi5351,
   SHELL_CMD(wspr, NULL, "Tune WSPR milliHz offset: wspr <clk_0_to_7> <milliHz>", cmdWSPR),
   SHELL_CMD(phase, NULL, "Set phase offset units: phase <clk_0_to_7> <units_0_to_127>", cmdPhase),
   SHELL_CMD(enable, NULL, "Enable/disable clock output: enable <clk_0_to_7> <0|1>", cmdEnable),
+  SHELL_CMD(drive, NULL, "Set drive strength: drive <clk_0_to_7> <2|4|6|8>", cmdDrive),
   SHELL_CMD(status, NULL, "Print live hardware ground truth status & parameters [clk]", cmdStatus),
   SHELL_CMD(reg_read, NULL, "Read register byte <reg>", cmdRegRead),
   SHELL_CMD(reg_write, NULL, "Write register byte <reg> <val>", cmdRegWrite),

@@ -30,41 +30,48 @@ bool Si5351::init(const struct i2c_dt_spec *spec, uint32_t tcxoFreq, uint32_t ba
 
   tcxoFreqHz = tcxoFreq;
 
-  // 1. Silence all clock outputs during initialization
+  // 1. Silence all clock outputs during initialization (Reg 3 = 0xFF)
   writeRegister(regOutputControl, 0xFF);
 
-  // 2. Disable hardware OEB pins so they do not override software output control
+  // 2. Power down all 8 clock channels initially (Reg 16..23 = 0x80)
+  for (uint8_t i = 0; i < 8; ++i) {
+    writeRegister(regCLKControlBase + i, 0x80);
+  }
+
+  // 3. Disable hardware OEB pins so they do not override software output control
   writeRegister(9, 0xFF);
 
-  // 3. Set internal crystal load capacitance (e.g. 10pF)
+  // 4. Set internal crystal load capacitance (e.g. 10pF)
   writeRegister(regCrystalLoad, 0xD2);
 
-  // 4. Disable spread spectrum
+  // 5. Disable spread spectrum
   writeRegister(149, 0x00);
 
-  // 5. Configure master PLL-A to ~900 MHz target relative to reference frequency
+  // 6. Configure master PLL-A to ~900 MHz target relative to reference frequency
   setupPLLA(pllFreqHz, tcxoFreqHz);
 
-  // 6. Initialize default channel outputs (with 8mA drive strength for clean scope signals):
-  // CLK0: 1x TX fundamental base frequency (push/pull positive leg)
+  // 7. Initialize default active channel outputs (strictly 2mA drive strength):
+  // CLK0: 1x TX fundamental base frequency (push/pull positive leg, 2mA)
   setFreq(0, baseFreqHz);
+  writeRegister(regCLKControlBase + 0, 0x0C);
 
-  // CLK1: 1x TX fundamental differential (push/pull negative leg, 180 deg inverted in software)
+  // CLK1: 1x TX fundamental differential (push/pull negative leg, 180 deg inverted, 2mA)
   setFreq(1, baseFreqHz);
-  writeRegister(regCLKControlBase + 1, 0x1F); // PLLA, MS, 8mA, inverted
+  writeRegister(regCLKControlBase + 1, 0x1C);
 
-  // CLK2: 3x AHC tracking loop (push/pull positive leg, 3x base frequency)
+  // CLK2: 3x AHC tracking loop (push/pull positive leg, 3x base frequency, 2mA)
   setFreq(2, baseFreqHz * 3);
+  writeRegister(regCLKControlBase + 2, 0x0C);
 
-  // CLK3: 3x AHC tracking loop differential (push/pull negative leg, 180 deg inverted in software)
+  // CLK3: 3x AHC tracking loop differential (push/pull negative leg, 180 deg inverted, 2mA)
   setFreq(3, baseFreqHz * 3);
-  writeRegister(regCLKControlBase + 3, 0x1F); // PLLA, MS, 8mA, inverted
+  writeRegister(regCLKControlBase + 3, 0x1C);
 
-  // 7. Reset master PLLA once at initialization to align internal accumulators
+  // 8. Reset master PLLA once at initialization to align internal accumulators
   writeRegister(regPLLReset, 0x20);
 
-  // 8. Unmask and enable active clock output gates
-  setClockOutputsEnabled(true);
+  // 9. Unmask output gates for active channels (CLK0..CLK3)
+  writeRegister(regOutputControl, 0xF0);
 
   initialized = true;
   LOG_INF("Si5351 initialized successfully. Ref=%u Hz, Base=%u Hz, PLL=%u Hz (All PLLA)",
@@ -82,10 +89,11 @@ bool Si5351::setFreq(uint8_t clk, uint32_t freqHz) {
   msDenominator[clk] = max20BitValue;
 
   // Configure clock control register for this output.
-  // Bit 7 = 0 (powered up), Bit 5 = 0 (PLLA), Bit 3:2 = 11 (MS output), Bit 1:0 = 11 (8mA drive) -> 0x0F
+  // Bit 7 = 0 (powered up), Bit 5 = 0 (PLLA), Bit 3:2 = 11 (MS output). Preserve invert & drive bits.
   uint8_t currentCtrl = readRegister(regCLKControlBase + clk);
   uint8_t invertBit = currentCtrl & 0x10; // Preserve invert bit (CLK1 / CLK3 push-pull)
-  writeRegister(regCLKControlBase + clk, 0x0F | invertBit);
+  uint8_t driveBits = (currentCtrl & 0x80) ? 0x00 : (currentCtrl & 0x03); // If unconfigured/powerdown on startup, default 2mA
+  writeRegister(regCLKControlBase + clk, 0x0C | invertBit | driveBits);
 
   updateMultiSynthDividers(clk);
   return true;
@@ -127,6 +135,23 @@ void Si5351::setOutputEnable(uint8_t clk, bool enabled) {
     current |= (1 << clk);
   }
   writeRegister(regOutputControl, current);
+}
+
+bool Si5351::setDriveStrengthmA(uint8_t clk, uint8_t drivemA) {
+  if (clk > 7) return false;
+  uint8_t bits = 0;
+  switch (drivemA) {
+    case 2: bits = 0x00; break;
+    case 4: bits = 0x01; break;
+    case 6: bits = 0x02; break;
+    case 8: bits = 0x03; break;
+    default: return false;
+  }
+  uint8_t regAddr = regCLKControlBase + clk;
+  uint8_t currentCtrl = readRegister(regAddr);
+  currentCtrl = (currentCtrl & ~0x03) | bits;
+  writeRegister(regAddr, currentCtrl);
+  return true;
 }
 
 void Si5351::setClockOutputsEnabled(bool enabled) {
