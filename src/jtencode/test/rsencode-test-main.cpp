@@ -1,4 +1,4 @@
-#include "RS-encode.hpp"
+#include "RSEncode.hpp"
 #include <iostream>
 #include <vector>
 #include <string>

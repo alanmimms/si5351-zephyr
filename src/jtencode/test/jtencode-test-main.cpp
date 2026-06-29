@@ -1,6 +1,6 @@
-#include "JT-encode-util.hpp"
-#include "JT-encode.hpp"
-#include "RS-encode.hpp"
+#include "JTEncodeUtil.hpp"
+#include "JTEncode.hpp"
+#include "RSEncode.hpp"
 #include <iostream>
 #include <string>
 #include <vector>

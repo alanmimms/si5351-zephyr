@@ -1,4 +1,4 @@
-#include "JT-encode-util.hpp"
+#include "JTEncodeUtil.hpp"
 
 uint8_t jtCode(char c) {
   if (std::isdigit(static_cast<unsigned char>(c))) {

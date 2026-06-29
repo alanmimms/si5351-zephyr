@@ -1,4 +1,4 @@
-#include "RS-encode.hpp"
+#include "RSEncode.hpp"
 #include <cstring>
 #include <stdexcept>
 #include <algorithm>

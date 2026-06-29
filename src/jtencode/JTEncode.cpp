@@ -1,5 +1,5 @@
-#include "JT-encode.hpp"
-#include "JT-encode-util.hpp"
+#include "JTEncode.hpp"
+#include "JTEncodeUtil.hpp"
 #include <cstring>
 #include <cstdio>
 

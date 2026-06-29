@@ -5,9 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_library(jtencode STATIC
-    JT-encode.cpp
-    RS-encode.cpp
-    JT-encode-util.cpp
+    JTEncode.cpp
+    RSEncode.cpp
+    JTEncodeUtil.cpp
 )
 
 target_include_directories(jtencode PUBLIC

@@ -8,10 +8,10 @@ set(BOARD esp32c3_devkitm CACHE STRING "Board target")
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(si5351)
 
-target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_sources(app PRIVATE
-  Si5351.cpp
+  src/Si5351.cpp
   src/main.cpp
   src/shell-commands.cpp
 )
