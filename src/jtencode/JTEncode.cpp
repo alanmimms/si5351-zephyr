@@ -2,8 +2,11 @@
 #include "JTEncodeUtil.hpp"
 #include <cstring>
 #include <cstdio>
+#include <span>
+#include <bit>
+#include <algorithm>
 
-static uint32_t nhash(const int* d) {
+static uint32_t nhash(std::span<const int, 2> d) {
   uint32_t h = 0x811c9dc5;
   for (int i = 0; i < 2; ++i) {
     h ^= static_cast<uint32_t>(d[i]);
@@ -46,8 +49,8 @@ void WSPREncoder::packBits() {
 }
 
 void WSPREncoder::convolveSymbols() {
-  const uint32_t g1 = 0xF2D05351;
-  const uint32_t g2 = 0xE4613C47;
+  constexpr uint32_t g1 = 0xF2D05351;
+  constexpr uint32_t g2 = 0xE4613C47;
   uint8_t messageBuffer[205] = {0};
   for (int i = 0; i < 50; ++i) {
     messageBuffer[i] = (packedData[i / 8] >> (7 - (i % 8))) & 1;
@@ -68,8 +71,8 @@ void WSPREncoder::interleave() {
   int d[2] = {0, 0};
   for (int i = 0; i < txBufferSize; ++i) {
     d[0] = i;
-    uint32_t h = nhash(d);
+    uint32_t h = nhash(std::span<const int, 2>(d));
     temporaryBuffer[i] = symbols[h % 162];
   }
-  std::memcpy(symbols, temporaryBuffer, txBufferSize);
+  std::copy(std::begin(temporaryBuffer), std::end(temporaryBuffer), std::begin(symbols));
 }

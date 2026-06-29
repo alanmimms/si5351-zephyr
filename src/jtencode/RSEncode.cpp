@@ -5,7 +5,7 @@
 
 #define RS_A_0_VAL(nnVal) (nnVal)
 
-int RSEncode::modNNPrivate(int x) const {
+constexpr int RSEncode::modNNPrivate(int x) const {
   while (x >= nn) {
     x -= nn;
     x = (x >> mm) + (x & nn);
@@ -106,39 +106,43 @@ RSEncode& RSEncode::operator=(RSEncode&& other) noexcept {
   return *this;
 }
 
-void RSEncode::encode(const std::vector<uint8_t>& data, std::vector<uint8_t>& parity) const {
+void RSEncode::encode(std::span<const uint8_t> data, std::span<uint8_t> parity) const {
   if (alphaTo.empty() || indexOf.empty() || genPoly.empty()) {
     throw std::runtime_error("RSEncode: Encoder internal tables not initialized. Cannot encode.");
   }
 
-  if (parity.size() != static_cast<size_t>(nroots)) {
-    parity.resize(nroots);
+  if (parity.size() < static_cast<size_t>(nroots)) {
+    throw std::runtime_error("RSEncode: Output parity span is too small.");
   }
 
-  const uint8_t* dataPtr = data.data();
-  uint8_t* parityPtr = parity.data();
-
-  std::memset(parityPtr, 0, nroots * sizeof(uint8_t));
+  std::fill(parity.begin(), parity.begin() + nroots, static_cast<uint8_t>(0));
 
   const int numDataSymbols = nn - nroots - pad;
   const size_t dataSize = data.size();
 
   for (int i = 0; i < numDataSymbols; ++i) {
-    uint8_t currentDataSymbol = (static_cast<size_t>(i) < dataSize) ? dataPtr[i] : 0x00;
-    uint8_t feedback = indexOf[currentDataSymbol ^ parityPtr[0]];
+    uint8_t currentDataSymbol = (static_cast<size_t>(i) < dataSize) ? data[i] : 0x00;
+    uint8_t feedback = indexOf[currentDataSymbol ^ parity[0]];
 
     if (feedback != RS_A_0_VAL(nn)) {
       for (int j = 1; j < nroots; ++j) {
-        parityPtr[j] ^= alphaTo[modNNPrivate(feedback + genPoly[nroots - j])];
+        parity[j] ^= alphaTo[modNNPrivate(feedback + genPoly[nroots - j])];
       }
     }
 
-    std::memmove(&parityPtr[0], &parityPtr[1], sizeof(uint8_t) * (nroots - 1));
+    std::move(parity.begin() + 1, parity.begin() + nroots, parity.begin());
 
     if (feedback != RS_A_0_VAL(nn)) {
-      parityPtr[nroots - 1] = alphaTo[modNNPrivate(feedback + genPoly[0])];
+      parity[nroots - 1] = alphaTo[modNNPrivate(feedback + genPoly[0])];
     } else {
-      parityPtr[nroots - 1] = 0;
+      parity[nroots - 1] = 0;
     }
   }
+}
+
+void RSEncode::encode(const std::vector<uint8_t>& data, std::vector<uint8_t>& parity) const {
+  if (parity.size() != static_cast<size_t>(nroots)) {
+    parity.resize(nroots);
+  }
+  encode(std::span<const uint8_t>(data.data(), data.size()), std::span<uint8_t>(parity.data(), parity.size()));
 }

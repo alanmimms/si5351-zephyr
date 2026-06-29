@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <span>
 #include <string>
 #include <stdexcept>
 #include <cctype>
@@ -9,7 +10,7 @@
 
 /**
  * @class RSEncode
- * @brief A C++ class for Reed-Solomon encoding.
+ * @brief A C++20 class for Reed-Solomon encoding.
  */
 class RSEncode {
 public:
@@ -22,11 +23,12 @@ public:
   RSEncode(RSEncode&& other) noexcept;
   RSEncode& operator=(RSEncode&& other) noexcept;
 
+  void encode(std::span<const uint8_t> data, std::span<uint8_t> parity) const;
   void encode(const std::vector<uint8_t>& data, std::vector<uint8_t>& parity) const;
 
-  int getNN() const { return nn; }
-  int getNRoots() const { return nroots; }
-  int getPad() const { return pad; }
+  constexpr int getNN() const { return nn; }
+  constexpr int getNRoots() const { return nroots; }
+  constexpr int getPad() const { return pad; }
 
 private:
   int mm;
@@ -41,5 +43,5 @@ private:
   std::vector<uint8_t> indexOf;
   std::vector<uint8_t> genPoly;
 
-  int modNNPrivate(int x) const;
+  constexpr int modNNPrivate(int x) const;
 };

@@ -1,9 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 
 /**
- * @brief Base class for JT/WSPR encoders.
+ * @brief Base class for JT/WSPR encoders using C++20.
  */
 template<uint16_t TONE_SPACING, uint16_t SYMBOL_PERIOD_MS, uint32_t DEFAULT_FREQ, int TX_BUFFER_SIZE>
 class JTEncoder {
@@ -17,6 +18,14 @@ public:
 
   explicit JTEncoder(uint32_t frequency = DEFAULT_FREQ) : txFreq(frequency), symbols{} {}
   virtual ~JTEncoder() = default;
+
+  constexpr std::span<const uint8_t> getSymbols() const {
+    return std::span<const uint8_t>(symbols, txBufferSize);
+  }
+
+  constexpr std::span<uint8_t> getSymbols() {
+    return std::span<uint8_t>(symbols, txBufferSize);
+  }
 
   virtual void encode(const char* callsign, const char* locator, int8_t powerDbm) {}
   virtual void encode(const char* message) {}
