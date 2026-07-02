@@ -7,7 +7,7 @@ LOG_MODULE_REGISTER(si5351, LOG_LEVEL_INF);
 
 Si5351::Si5351() {
   tcxoFreqHz = 0;
-  pllFreqHz = 900000000;
+  pllFreqHz = 883899700;
 
   for (int i = 0; i < 8; ++i) {
     clkBaseFreqHz[i] = 0;
@@ -33,83 +33,155 @@ bool Si5351::init(const struct i2c_dt_spec *spec, uint32_t tcxoFreq, uint32_t ba
   // 1. Silence all clock outputs during initialization (Reg 3 = 0xFF)
   writeRegister(regOutputControl, 0xFF);
 
-  // 2. Power down all 8 clock channels initially (Reg 16..23 = 0x80)
+  // 2. Clear tracked state, power down (0x80), and zero out MultiSynth parameters for all 8 channels initially
   for (uint8_t i = 0; i < 8; ++i) {
+    clkBaseFreqHz[i] = 0;
+    clkOffsetMilliHz[i] = 0;
+    clkPhaseOffset[i] = 0;
+    msInteger[i] = 0;
+    msNumerator[i] = 0;
+    msDenominator[i] = max20BitValue;
     writeRegister(regCLKControlBase + i, 0x80);
+    writeSynthParams(regMultiSynthBase + (i * 8), 0, 0, max20BitValue);
   }
 
   // 3. Disable hardware OEB pins so they do not override software output control
   writeRegister(9, 0xFF);
 
-  // 4. Set internal crystal load capacitance (e.g. 10pF)
-  writeRegister(regCrystalLoad, 0xD2);
+  // 4. Disable internal crystal load capacitance for external TCXO input (0 pF per Skyworks AN619)
+  writeRegister(regCrystalLoad, 0x12);
 
   // 5. Disable spread spectrum
   writeRegister(149, 0x00);
 
-  // 6. Configure master PLL-A to ~900 MHz target relative to reference frequency
+  // 6. Configure master PLL-A to pure integer multiplier 34 (~883.9 MHz) relative to reference frequency
   setupPLLA(pllFreqHz, tcxoFreqHz);
 
-  // 7. Initialize default active channel outputs (strictly 2mA drive strength):
-  // CLK0: 1x TX fundamental base frequency (push/pull positive leg, 2mA)
+  // 7. Initialize default active channel output CLK0 (strictly 2mA drive strength):
   setFreq(0, baseFreqHz);
   writeRegister(regCLKControlBase + 0, 0x0C);
-
-  // CLK1: 1x TX fundamental differential (push/pull negative leg, 180 deg inverted, 2mA)
-  setFreq(1, baseFreqHz);
-  writeRegister(regCLKControlBase + 1, 0x1C);
-
-  // CLK2: 3x AHC tracking loop (push/pull positive leg, 3x base frequency, 2mA)
-  setFreq(2, baseFreqHz * 3);
-  writeRegister(regCLKControlBase + 2, 0x0C);
-
-  // CLK3: 3x AHC tracking loop differential (push/pull negative leg, 180 deg inverted, 2mA)
-  setFreq(3, baseFreqHz * 3);
-  writeRegister(regCLKControlBase + 3, 0x1C);
 
   // 8. Reset master PLLA once at initialization to align internal accumulators
   writeRegister(regPLLReset, 0x20);
 
-  // 9. Unmask output gates for active channels (CLK0..CLK3)
-  writeRegister(regOutputControl, 0xF0);
+  // 9. Keep all clock outputs initially disabled (Reg 3 = 0xFF)
+  writeRegister(regOutputControl, 0xFF);
 
   initialized = true;
-  LOG_INF("Si5351 initialized successfully. Ref=%u Hz, Base=%u Hz, PLL=%u Hz (All PLLA)",
+  LOG_INF("Si5351 initialized successfully. Ref=%u Hz, Base=%u Hz, PLL=%u Hz (Pure Integer PLLA)",
           tcxoFreqHz, baseFreqHz, pllFreqHz);
   return true;
+}
+
+bool Si5351::setRefFreq(uint32_t refFreqHz) {
+  if (!i2cSpec || !i2c_is_ready_dt(i2cSpec) || refFreqHz == 0) return false;
+
+  tcxoFreqHz = refFreqHz;
+
+  // Recalculate pure integer master PLLA settings (b=0)
+  setupPLLA(pllFreqHz, tcxoFreqHz);
+
+  // Recalculate integer MultiSynth parameters for active channels
+  for (uint8_t clk = 0; clk < 8; ++clk) {
+    if (clkBaseFreqHz[clk] > 0) {
+      msInteger[clk] = pllFreqHz / clkBaseFreqHz[clk];
+      msNumerator[clk] = 0;
+      msDenominator[clk] = max20BitValue;
+      updateMultiSynthDividers(clk);
+    }
+  }
+
+  writeRegister(regPLLReset, 0x20);
+  LOG_INF("Si5351 reference frequency updated to %u Hz (PLL=%u Hz).", tcxoFreqHz, pllFreqHz);
+  return true;
+}
+
+void Si5351::setPLLA(uint32_t mult, uint32_t num, uint32_t denom) {
+  if (denom == 0) denom = 1;
+  uint32_t a = mult;
+  uint32_t b = num;
+  uint32_t c = denom;
+
+  pllFreqHz = tcxoFreqHz * a + static_cast<uint32_t>((static_cast<uint64_t>(tcxoFreqHz) * b) / c);
+
+  writeSynthParams(regPLLABase, a, b, c);
+  writeRegister(regPLLReset, 0x20);
+
+  for (uint8_t clk = 0; clk < 8; ++clk) {
+    if (clkBaseFreqHz[clk] > 0) {
+      updateMultiSynthDividers(clk);
+    }
+  }
+  LOG_INF("PLLA updated manually to %u + %u/%u (PLL=%u Hz).", a, b, c, pllFreqHz);
 }
 
 bool Si5351::setFreq(uint8_t clk, uint32_t freqHz) {
   if (clk > 7 || freqHz == 0) return false;
   clkBaseFreqHz[clk] = freqHz;
 
+  // Pick an even integer MultiSynth divider candidate (multiple of 6) so both clk0/1 (integer a)
+  // and clk2/3 (integer a/3) use pure integer MultiSynth dividers with b_ms=0!
+  uint32_t bestN = 60;
+  uint32_t targetVCO = 850000000;
+  uint32_t minDiff = 0xFFFFFFFF;
+
+  for (uint32_t candidate = 12; candidate <= 252; candidate += 6) {
+    uint64_t vco = static_cast<uint64_t>(candidate) * freqHz;
+    if (vco >= 600000000ULL && vco <= 900000000ULL) {
+      uint32_t diff = (vco > targetVCO) ? static_cast<uint32_t>(vco - targetVCO)
+                                        : static_cast<uint32_t>(targetVCO - vco);
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestN = candidate;
+      }
+    }
+  }
+
+  uint32_t newPLLFreq = bestN * freqHz;
+  bool pllChanged = (newPLLFreq != pllFreqHz);
+  pllFreqHz = newPLLFreq;
+
+  // MultiSynth is ALWAYS a pure integer (b=0) to eliminate output stage phase noise spurs
   msInteger[clk] = pllFreqHz / freqHz;
-  uint64_t remainder = pllFreqHz % freqHz;
-  msNumerator[clk] = static_cast<uint32_t>((remainder * max20BitValue) / freqHz);
+  msNumerator[clk] = 0;
   msDenominator[clk] = max20BitValue;
 
-  // Configure clock control register for this output.
-  // Bit 7 = 0 (powered up), Bit 5 = 0 (PLLA), Bit 3:2 = 11 (MS output). Preserve invert & drive bits.
+  // Re-setup PLLA for the exact target PLL frequency (allows fractional PLLA multiplier for exact RF frequency)
+  setupPLLA(pllFreqHz, tcxoFreqHz);
+
+  // Configure clock control register for this output
   uint8_t currentCtrl = readRegister(regCLKControlBase + clk);
-  uint8_t invertBit = currentCtrl & 0x10; // Preserve invert bit (CLK1 / CLK3 push-pull)
-  uint8_t driveBits = (currentCtrl & 0x80) ? 0x00 : (currentCtrl & 0x03); // If unconfigured/powerdown on startup, default 2mA
+  uint8_t invertBit = currentCtrl & 0x10;
+  uint8_t driveBits = (currentCtrl & 0x80) ? 0x00 : (currentCtrl & 0x03);
   writeRegister(regCLKControlBase + clk, 0x0C | invertBit | driveBits);
 
   updateMultiSynthDividers(clk);
+
+  // Reset PLL when PLL frequency changes to align accumulators
+  if (pllChanged) {
+    writeRegister(regPLLReset, 0x20);
+  }
   return true;
 }
 
-void Si5351::tuneWSPROffset(uint8_t clk, int32_t milliHzOffset) {
+void Si5351::tuneOffset(uint8_t clk, int32_t milliHzOffset) {
   if (clk > 7 || clkBaseFreqHz[clk] == 0) return;
   clkOffsetMilliHz[clk] = milliHzOffset;
 
-  const auto mho = static_cast<int64_t>(milliHzOffset) * max20BitValue;
-  const auto cbf = static_cast<int64_t>(clkBaseFreqHz[clk]) * 1000;
-  int64_t scaledOffset = mho / cbf;
-  uint32_t adjustedNumerator = msNumerator[clk] + static_cast<int32_t>(scaledOffset);
+  // Modulate PLLA frequency atomically over I2C burst WITHOUT PLL reset!
+  // MultiSynth divider msInteger[clk] stays a pure integer (b=0) everywhere to eliminate phase noise spurs.
+  int64_t pllOffsetMilliHz = static_cast<int64_t>(msInteger[clk]) * milliHzOffset;
+  int64_t targetPLLMilliHz = static_cast<int64_t>(pllFreqHz) * 1000LL + pllOffsetMilliHz;
 
-  uint8_t baseReg = regMultiSynthBase + (clk * 8);
-  writeSynthParams(baseReg, msInteger[clk], adjustedNumerator, msDenominator[clk]);
+  if (targetPLLMilliHz <= 0 || tcxoFreqHz == 0) return;
+
+  uint64_t refMilliHz = static_cast<uint64_t>(tcxoFreqHz) * 1000ULL;
+  uint32_t a_pll = static_cast<uint32_t>(targetPLLMilliHz / refMilliHz);
+  uint64_t rem = static_cast<uint64_t>(targetPLLMilliHz % refMilliHz);
+  uint32_t b_pll = static_cast<uint32_t>((rem * max20BitValue) / refMilliHz);
+  uint32_t c_pll = max20BitValue;
+
+  writeSynthParams(regPLLABase, a_pll, b_pll, c_pll);
 }
 
 void Si5351::setPhaseOffset(uint8_t clk, uint8_t phaseUnits) {
@@ -236,7 +308,14 @@ bool Si5351::readLiveGroundTruth(LiveDeviceStatus &status) {
   status.los = (status.statusReg0 & (1 << 4)) != 0;
   status.revId = status.statusReg0 & 0x03;
 
-  auto decodeSynthBlock = [&](uint8_t baseReg) -> double {
+  struct DecodedSynth {
+    double ratio = 0.0;
+    uint32_t multOrDiv = 0;
+    uint32_t num = 0;
+    uint32_t denom = 0;
+  };
+
+  auto decodeSynthBlock = [&](uint8_t baseReg) -> DecodedSynth {
     uint32_t p3 = (static_cast<uint32_t>(regs[baseReg + 0]) << 8) | regs[baseReg + 1];
     uint32_t p1High = regs[baseReg + 2] & 0x03;
     uint32_t p1 = (p1High << 16) | (static_cast<uint32_t>(regs[baseReg + 3]) << 8) | regs[baseReg + 4];
@@ -246,15 +325,26 @@ bool Si5351::readLiveGroundTruth(LiveDeviceStatus &status) {
     uint32_t p2 = (p2High << 16) | (static_cast<uint32_t>(regs[baseReg + 6]) << 8) | regs[baseReg + 7];
 
     if (p3 == 0) p3 = 1;
-    double ratio = (static_cast<double>(p1) + 512.0 + (static_cast<double>(p2) / p3)) / 128.0;
-    return ratio;
+    DecodedSynth res;
+    res.denom = p3;
+    uint32_t p1Val = p1 + 512;
+    res.multOrDiv = p1Val / 128;
+    uint32_t remP1 = p1Val % 128;
+    res.num = static_cast<uint32_t>((static_cast<uint64_t>(remP1) * p3 + p2) / 128);
+    res.ratio = static_cast<double>(res.multOrDiv) + (static_cast<double>(res.num) / res.denom);
+    return res;
   };
 
-  double pllaRatio = decodeSynthBlock(regPLLABase); // Reg 26
-  double pllbRatio = decodeSynthBlock(regPLLBBase); // Reg 34
+  DecodedSynth pllaSynth = decodeSynthBlock(regPLLABase); // Reg 26
+  DecodedSynth pllbSynth = decodeSynthBlock(regPLLBBase); // Reg 34
 
-  status.pllaFreqHz = static_cast<uint32_t>(static_cast<double>(tcxoFreqHz) * pllaRatio);
-  status.pllbFreqHz = static_cast<uint32_t>(static_cast<double>(tcxoFreqHz) * pllbRatio);
+  status.pllaRatio = pllaSynth.ratio;
+  status.pllaInteger = pllaSynth.multOrDiv;
+  status.pllaNumerator = pllaSynth.num;
+  status.pllaDenominator = pllaSynth.denom;
+
+  status.pllaFreqHz = static_cast<uint32_t>(static_cast<double>(tcxoFreqHz) * status.pllaRatio);
+  status.pllbFreqHz = static_cast<uint32_t>(static_cast<double>(tcxoFreqHz) * pllbSynth.ratio);
 
   uint8_t gateCtrl = regs[regOutputControl]; // Reg 3
 
@@ -276,11 +366,24 @@ bool Si5351::readLiveGroundTruth(LiveDeviceStatus &status) {
     status.channels[c].usesPLLB = (clkCtrl & 0x20) != 0;
     status.channels[c].phaseOffsetUnits = regs[regPhaseOffsetBase + c] & 0x7F;
 
-    double msRatio = decodeSynthBlock(regMultiSynthBase + (c * 8));
-    double pllUsed = status.channels[c].usesPLLB ? status.pllbFreqHz : status.pllaFreqHz;
-    if (msRatio > 0) {
-      status.channels[c].decodedFreqHz = static_cast<uint32_t>(pllUsed / msRatio);
+    if (poweredUp) {
+      DecodedSynth msSynth = decodeSynthBlock(regMultiSynthBase + (c * 8));
+      status.channels[c].msRatio = msSynth.ratio;
+      status.channels[c].msInteger = msSynth.multOrDiv;
+      status.channels[c].msNumerator = msSynth.num;
+      status.channels[c].msDenominator = msSynth.denom;
+
+      double pllUsed = status.channels[c].usesPLLB ? status.pllbFreqHz : status.pllaFreqHz;
+      if (msSynth.ratio > 0) {
+        status.channels[c].decodedFreqHz = static_cast<uint32_t>(pllUsed / msSynth.ratio);
+      } else {
+        status.channels[c].decodedFreqHz = 0;
+      }
     } else {
+      status.channels[c].msRatio = 0.0;
+      status.channels[c].msInteger = 0;
+      status.channels[c].msNumerator = 0;
+      status.channels[c].msDenominator = 0;
       status.channels[c].decodedFreqHz = 0;
     }
   }
@@ -323,6 +426,7 @@ uint8_t Si5351::getDriveStrengthmA(uint8_t clk) {
 }
 
 void Si5351::setupPLLA(uint32_t targetPLLFreqHz, uint32_t refFreqHz) {
+  if (refFreqHz == 0) return;
   uint32_t a = targetPLLFreqHz / refFreqHz;
   uint64_t rem = targetPLLFreqHz % refFreqHz;
   uint32_t b = static_cast<uint32_t>((rem * max20BitValue) / refFreqHz);

@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20.0)
 
 # Set default board for west build when not specified on command line
-set(BOARD esp32c3_devkitm CACHE STRING "Board target")
+set(BOARD esp32s3_devkitm/esp32s3/procpu CACHE STRING "Board target")
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(si5351)
@@ -12,6 +12,7 @@ target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_sources(app PRIVATE
   src/Si5351.cpp
+  src/AD9850.cpp
   src/main.cpp
   src/shell-commands.cpp
 )

@@ -11,6 +11,10 @@ struct LiveChannelStatus {
   bool usesPLLB = false;
   uint32_t decodedFreqHz = 0;
   uint8_t phaseOffsetUnits = 0;
+  double msRatio = 0.0;
+  uint32_t msInteger = 0;
+  uint32_t msNumerator = 0;
+  uint32_t msDenominator = 0;
 };
 
 struct LiveDeviceStatus {
@@ -22,6 +26,10 @@ struct LiveDeviceStatus {
   uint8_t revId = 0;
   uint32_t pllaFreqHz = 0;
   uint32_t pllbFreqHz = 0;
+  double pllaRatio = 0.0;
+  uint32_t pllaInteger = 0;
+  uint32_t pllaNumerator = 0;
+  uint32_t pllaDenominator = 0;
   LiveChannelStatus channels[8];
 };
 
@@ -33,11 +41,18 @@ public:
   // Initializes reference parameters and master PLL-A
   bool init(const struct i2c_dt_spec *spec, uint32_t tcxoFreqHz, uint32_t baseFreqHz);
 
+  // Dynamically updates reference clock frequency in Hz, atomically recalculating dividers while preserving channel states
+  bool setRefFreq(uint32_t refFreqHz);
+
+  // Directly configures PLLA multiplier, numerator, and denominator for testing fractional spurs
+  void setPLLA(uint32_t mult, uint32_t num, uint32_t denom = 1048575);
+
   // Set frequency for specific clock output (0..7)
   bool setFreq(uint8_t clk, uint32_t freqHz);
 
-  // Shifts numerator for specific clock output (0..7) using millihertz metrics
-  void tuneWSPROffset(uint8_t clk, int32_t milliHzOffset);
+  // Dynamically tunes milliHz frequency offset via phase-continuous atomic PLLA modulation over I2C burst
+  void tuneOffset(uint8_t clk, int32_t milliHzOffset);
+  void tuneWSPROffset(uint8_t clk, int32_t milliHzOffset) { tuneOffset(clk, milliHzOffset); }
 
   // Sets static phase offset for specific clock output (0..7)
   void setPhaseOffset(uint8_t clk, uint8_t phaseUnits);
@@ -89,7 +104,7 @@ private:
   bool initialized = false;
 
   uint32_t tcxoFreqHz = 0;
-  uint32_t pllFreqHz = 900000000;
+  uint32_t pllFreqHz = 883899700;
 
   uint32_t clkBaseFreqHz[8] = {0};
   int32_t clkOffsetMilliHz[8] = {0};
